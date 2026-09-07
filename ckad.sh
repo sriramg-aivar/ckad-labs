@@ -36,6 +36,11 @@ SCENARIO_DIRS=(
   "scenario-14-ingress"
   "scenario-15-fix-ingress-pathtype"
   "scenario-16-resource-limits"
+  "scenario-17-configmap"
+  "scenario-18-pause-resume"
+  "scenario-19-job-from-cronjob"
+  "scenario-20-double-resources"
+  "scenario-21-quota-fit"
 )
 
 SCENARIO_TITLES=(
@@ -55,6 +60,11 @@ SCENARIO_TITLES=(
   "Create Ingress Resource"
   "Fix Ingress PathType"
   "Resource Requests & Limits"
+  "ConfigMap in Deployment"
+  "Pause & Resume Rollout"
+  "Job From CronJob"
+  "Double Resources"
+  "Fit Deployment to Quota"
 )
 
 TOTAL=${#SCENARIO_DIRS[@]}
@@ -380,7 +390,7 @@ main() {
       p) prev_scenario ;;
       l) list_all ;;
       q) cleanup_on_quit; exit 0 ;;
-      [1-9]|1[0-6])
+      [1-9]|1[0-9]|2[01])
         local jump=$((10#$choice))
         if ((jump >= 1 && jump <= TOTAL)); then
           CURRENT=$((jump - 1))
