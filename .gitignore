@@ -1,0 +1,9 @@
+# Progress tracking (local state)
+.ckad-progress
+
+# Scenario work / scratch files
+ckad-work/
+tls.crt
+tls.key
+*.tar
+*.tmp

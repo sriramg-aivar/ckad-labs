@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ════════════════════════════════════════════════════════════════════
-#  CKAD Practice Labs — Interactive Runner
-# ════════════════════════════════════════════════════════════════════
+# CKAD Practice Labs - Interactive Sequential Study Mode
+# Usage: ./ckad.sh [scenario_number]
 
-PROGRESS_FILE=".ckad-progress"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROGRESS_FILE="$SCRIPT_DIR/.ckad-progress"
 
-# ── Colors ──────────────────────────────────────────────────────────
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+DIM='\033[2m'
+NC='\033[0m'
 
-# ── Scenarios ───────────────────────────────────────────────────────
-SCENARIO_DIRS=(
+# All scenarios in order
+SCENARIOS=(
   "scenario-01-secret"
   "scenario-02-cronjob"
   "scenario-03-rbac"
@@ -67,336 +66,435 @@ SCENARIO_TITLES=(
   "Fit Deployment to Quota"
 )
 
-TOTAL=${#SCENARIO_DIRS[@]}
 CURRENT=0
+COMPLETED=()
+SCENARIO_ACTIVE=false  # tracks if a scenario is currently set up
+TOTAL=${#SCENARIOS[@]}  # total number of scenarios (auto-counted)
+LAST_INDEX=$((TOTAL - 1))
 
-# ── Progress Management ─────────────────────────────────────────────
-declare -a DONE
+# ─── Progress management ───────────────────────────────────────────
 
 load_progress() {
-  DONE=()
-  for ((i=0; i<TOTAL; i++)); do
-    DONE[$i]=0
-  done
-  if [[ -f "$PROGRESS_FILE" ]]; then
-    while IFS= read -r line; do
-      if [[ "$line" =~ ^([0-9]+)$ ]]; then
-        local idx="${BASH_REMATCH[1]}"
-        if (( idx >= 0 && idx < TOTAL )); then
-          DONE[$idx]=1
-        fi
-      fi
-    done < "$PROGRESS_FILE"
+  CURRENT=0
+  COMPLETED=()
+  if [ -f "$PROGRESS_FILE" ]; then
+    source "$PROGRESS_FILE"
   fi
 }
 
 save_progress() {
-  > "$PROGRESS_FILE"
-  for ((i=0; i<TOTAL; i++)); do
-    if [[ "${DONE[$i]}" == "1" ]]; then
-      echo "$i" >> "$PROGRESS_FILE"
+  {
+    echo "CURRENT=$CURRENT"
+    if [ ${#COMPLETED[@]} -gt 0 ]; then
+      echo "COMPLETED=(${COMPLETED[*]})"
+    else
+      echo "COMPLETED=()"
     fi
+  } > "$PROGRESS_FILE"
+}
+
+is_completed() {
+  local num=$1
+  if [ ${#COMPLETED[@]} -eq 0 ]; then
+    return 1
+  fi
+  for c in "${COMPLETED[@]}"; do
+    [ "$c" = "$num" ] && return 0
   done
+  return 1
 }
 
-# ── Display Helpers ─────────────────────────────────────────────────
-print_header() {
-  clear
-  echo -e "${CYAN}"
-  echo "  ██████╗██╗  ██╗ █████╗ ██████╗ "
-  echo " ██╔════╝██║ ██╔╝██╔══██╗██╔══██╗"
-  echo " ██║     █████╔╝ ███████║██║  ██║"
-  echo " ██║     ██╔═██╗ ██╔══██║██║  ██║"
-  echo " ╚██████╗██║  ██╗██║  ██║██████╔╝"
-  echo "  ╚═════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝"
-  echo -e "${NC}"
-  echo -e "${BOLD}  CKAD Practice Labs — Interactive Runner${NC}"
-  echo ""
+mark_completed() {
+  local num=$1
+  if ! is_completed "$num"; then
+    COMPLETED+=("$num")
+    save_progress
+  fi
 }
 
-print_progress() {
-  local done_count=0
-  for ((i=0; i<TOTAL; i++)); do
-    if [[ "${DONE[$i]}" == "1" ]]; then
-      ((done_count++))
-    fi
-  done
-  echo -e "  Progress: ${GREEN}${done_count}${NC}/${TOTAL} completed"
-  echo ""
+reset_all_progress() {
+  CURRENT=0
+  COMPLETED=()
+  rm -f "$PROGRESS_FILE"
 }
 
-print_scenario() {
-  local idx=$1
+# ─── Display functions ─────────────────────────────────────────────
+
+clear_screen() {
+  printf '\033[2J\033[H'
+}
+
+show_header() {
+  local idx=$CURRENT
   local num=$((idx + 1))
-  local numpad
-  numpad=$(printf "%02d" "$num")
-  local status=""
-  if [[ "${DONE[$idx]}" == "1" ]]; then
-    status="${GREEN}✓${NC}"
+  local numstr
+  numstr=$(printf "%02d" "$num")
+
+  echo -e "${BOLD}${CYAN}"
+  echo "╔═══════════════════════════════════════════════════════════════╗"
+  echo "║            CKAD Practice Labs - Study Mode                    ║"
+  echo "╚═══════════════════════════════════════════════════════════════╝"
+  echo -e "${NC}"
+
+  # Progress
+  local done=${#COMPLETED[@]}
+  echo -e "  Progress: ${GREEN}${done}${NC}/${TOTAL} completed"
+  echo ""
+
+  # Current scenario
+  if is_completed "$idx"; then
+    echo -e "  ${GREEN}▶ Scenario ${numstr}/${TOTAL}: ${SCENARIO_TITLES[$idx]} ✓${NC}"
   else
-    status="${RED}○${NC}"
+    echo -e "  ${YELLOW}▶ Scenario ${numstr}/${TOTAL}: ${SCENARIO_TITLES[$idx]}${NC}"
   fi
-  if [[ $idx -eq $CURRENT ]]; then
-    echo -e "  ${BOLD}▶ [${status}${BOLD}] ${numpad}. ${SCENARIO_TITLES[$idx]}${NC}"
-  else
-    echo -e "    [${status}] ${numpad}. ${SCENARIO_TITLES[$idx]}"
-  fi
+  echo ""
 }
 
-list_all() {
-  print_header
-  print_progress
-  echo -e "${BOLD}  All Scenarios:${NC}"
-  echo ""
-  for ((i=0; i<TOTAL; i++)); do
-    print_scenario "$i"
-  done
-  echo ""
-  echo -e "  Press ${YELLOW}Enter${NC} to return..."
-  read -r
-}
-
-show_main_menu() {
-  print_header
-  print_progress
-  local num=$((CURRENT + 1))
-  local numpad
-  numpad=$(printf "%02d" "$num")
-  local status_text
-  if [[ "${DONE[$CURRENT]}" == "1" ]]; then
-    status_text="${GREEN}[DONE]${NC}"
-  else
-    status_text="${YELLOW}[TODO]${NC}"
-  fi
-  echo -e "  Current: ${BOLD}${numpad}. ${SCENARIO_TITLES[$CURRENT]}${NC} ${status_text}"
-  echo -e "  Dir:     ${SCENARIO_DIRS[$CURRENT]}/"
-  echo ""
+show_menu() {
   echo -e "  ${BOLD}Options:${NC}"
-  echo -e "    ${CYAN}[r]${NC} Run/Setup     ${CYAN}[t]${NC} Show Task      ${CYAN}[s]${NC} Show Solution"
-  echo -e "    ${CYAN}[c]${NC} Check answer  ${CYAN}[x]${NC} Reset          ${CYAN}[d]${NC} Mark done & next"
-  echo -e "    ${CYAN}[n]${NC} Next          ${CYAN}[p]${NC} Previous       ${CYAN}[l]${NC} List all"
+  echo -e "    ${CYAN}[r]${NC} Run/Setup this scenario"
+  echo -e "    ${CYAN}[t]${NC} Show Task (question)"
+  echo -e "    ${CYAN}[s]${NC} Show Solution"
+  echo -e "    ${CYAN}[c]${NC} Check my answer"
+  echo -e "    ${CYAN}[x]${NC} Reset (cleanup) this scenario"
+  echo -e "    ${CYAN}[f]${NC} Full reset (cleans ALL scenarios)"
+  echo -e "    ${CYAN}[d]${NC} Mark done & next →"
+  echo -e "    ${CYAN}[n]${NC} Next scenario →"
+  echo -e "    ${CYAN}[p]${NC} Previous scenario ←"
+  echo -e "    ${CYAN}[l]${NC} List all scenarios"
   echo -e "    ${CYAN}[q]${NC} Quit"
   echo ""
 }
 
-# ── Cluster Health Check ────────────────────────────────────────────
-check_cluster() {
-  echo -e "${YELLOW}Checking cluster health...${NC}"
-  if ! kubectl get nodes &>/dev/null; then
-    echo -e "${RED}ERROR: Cannot reach Kubernetes cluster!${NC}"
-    echo "Make sure your cluster is running and kubectl is configured."
-    echo ""
-    echo -e "Press ${YELLOW}Enter${NC} to continue anyway, or Ctrl+C to abort..."
-    read -r
-    return 1
-  fi
-  echo -e "${GREEN}✓ Cluster is reachable${NC}"
-  kubectl get nodes --no-headers 2>/dev/null | while read -r line; do
-    echo "  $line"
-  done
-  echo ""
-  return 0
-}
-
-# ── Scenario Actions ────────────────────────────────────────────────
-run_setup() {
-  local dir="${SCENARIO_DIRS[$CURRENT]}"
-  if [[ ! -d "$dir" ]]; then
-    echo -e "${RED}Directory $dir not found!${NC}"
-    echo -e "Press ${YELLOW}Enter${NC} to continue..."
-    read -r
-    return
-  fi
-  if [[ ! -f "$dir/setup.sh" ]]; then
-    echo -e "${RED}No setup.sh found in $dir${NC}"
-    echo -e "Press ${YELLOW}Enter${NC} to continue..."
-    read -r
-    return
-  fi
-
-  check_cluster
-
-  echo -e "${BLUE}═══ Setting up: ${SCENARIO_TITLES[$CURRENT]} ═══${NC}"
-  echo ""
-  bash "$dir/setup.sh"
-  echo ""
-  echo -e "${GREEN}✓ Setup complete!${NC}"
-  echo ""
-
-  # Show task after setup
-  if [[ -f "$dir/TASK.md" ]]; then
-    echo -e "${BOLD}═══ TASK ═══${NC}"
-    cat "$dir/TASK.md"
-    echo ""
-  fi
-
-  # Enter sub-loop
-  scenario_subloop
-}
-
 show_task() {
-  local dir="${SCENARIO_DIRS[$CURRENT]}"
-  if [[ -f "$dir/TASK.md" ]]; then
-    echo ""
-    echo -e "${BOLD}═══ TASK: ${SCENARIO_TITLES[$CURRENT]} ═══${NC}"
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  echo ""
+  echo -e "${BOLD}${BLUE}━━━ TASK ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  if [ -f "$dir/TASK.md" ]; then
     echo ""
     cat "$dir/TASK.md"
-    echo ""
   else
-    echo -e "${RED}No TASK.md found in $dir${NC}"
+    echo -e "${RED}  No TASK.md found for this scenario.${NC}"
   fi
-  echo -e "Press ${YELLOW}Enter${NC} to continue..."
-  read -r
+  echo ""
+  echo -e "${BOLD}${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
 }
 
 show_solution() {
-  local dir="${SCENARIO_DIRS[$CURRENT]}"
-  if [[ -f "$dir/solution.md" ]]; then
-    echo ""
-    echo -e "${BOLD}═══ SOLUTION: ${SCENARIO_TITLES[$CURRENT]} ═══${NC}"
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  echo ""
+  echo -e "${BOLD}${GREEN}━━━ SOLUTION ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  if [ -f "$dir/solution.md" ]; then
     echo ""
     cat "$dir/solution.md"
-    echo ""
   else
-    echo -e "${RED}No solution.md found in $dir${NC}"
+    echo -e "${RED}  No solution.md found for this scenario.${NC}"
   fi
-  echo -e "Press ${YELLOW}Enter${NC} to continue..."
-  read -r
+  echo ""
+  echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+  echo ""
 }
 
-check_answer() {
-  local dir="${SCENARIO_DIRS[$CURRENT]}"
-  if [[ -f "$dir/check.sh" ]]; then
+# ─── Actions ───────────────────────────────────────────────────────
+
+do_setup() {
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  if [ ! -f "$dir/setup.sh" ]; then
+    echo -e "  ${RED}No setup.sh found for this scenario.${NC}"
+    wait_enter
+    return
+  fi
+
+  # Health check: can we reach the cluster?
+  if ! kubectl get nodes --request-timeout=5s &>/dev/null; then
     echo ""
-    echo -e "${BOLD}═══ Checking: ${SCENARIO_TITLES[$CURRENT]} ═══${NC}"
+    echo -e "  ${RED}${BOLD}ERROR: Cannot connect to the cluster!${NC}"
+    echo ""
+    echo -e "  ${YELLOW}Debug steps:${NC}"
+    echo ""
+    echo -e "  ${DIM}# Check if apiserver container is running:${NC}"
+    echo -e "  ${CYAN}crictl ps | grep kube-apiserver${NC}"
+    echo ""
+    echo -e "  ${DIM}# Restart kubelet to force re-read manifests:${NC}"
+    echo -e "  ${CYAN}systemctl restart kubelet${NC}"
+    echo ""
+    echo -e "  ${DIM}# Wait and check again:${NC}"
+    echo -e "  ${CYAN}sleep 30 && kubectl get nodes${NC}"
+    echo ""
+    wait_enter
+    return
+  fi
+
+  echo ""
+  echo -e "  ${YELLOW}Setting up scenario...${NC}"
+  echo ""
+  bash "$dir/setup.sh"
+  SCENARIO_ACTIVE=true
+  echo ""
+  echo -e "  ${GREEN}✓ Scenario is ready!${NC}"
+  echo ""
+
+  # Show task immediately
+  show_task
+
+  # Now enter a working loop — user stays here until they go back
+  while true; do
+    echo -e "  ${BOLD}${YELLOW}>>> Solve this in another terminal <<<${NC}"
+    echo ""
+    echo -e "  ${CYAN}[t]${NC} Show task again  ${CYAN}[s]${NC} Solution  ${CYAN}[c]${NC} Check  ${CYAN}[b]${NC} Back to menu"
+    echo ""
+    echo -ne "  ${BOLD}Choice: ${NC}"
+    read -r -n1 subchoice
+    echo ""
+
+    case "$subchoice" in
+      t|T) show_task ;;
+      s|S) show_solution ;;
+      c|C) do_check_inline ;;
+      b|B|"") return ;;
+      *) ;;
+    esac
+  done
+}
+
+do_check_inline() {
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  echo ""
+  if [ -f "$dir/check.sh" ]; then
+    echo -e "  ${YELLOW}Checking your answer...${NC}"
     echo ""
     if bash "$dir/check.sh"; then
       echo ""
-      echo -e "${GREEN}✓ All checks passed!${NC}"
+      echo -e "  ${GREEN}${BOLD}✓ All checks passed! Well done!${NC}"
     else
       echo ""
-      echo -e "${RED}✗ Some checks failed. Review and try again.${NC}"
+      echo -e "  ${RED}✗ Some checks failed. Keep trying or view solution [s].${NC}"
     fi
   else
-    echo -e "${YELLOW}No automated check for this scenario.${NC}"
-    echo "Compare your work against the solution: $dir/solution.md"
+    echo -e "  ${DIM}No automated check. Compare with solution [s].${NC}"
   fi
   echo ""
-  echo -e "Press ${YELLOW}Enter${NC} to continue..."
-  read -r
 }
 
-reset_scenario() {
-  local dir="${SCENARIO_DIRS[$CURRENT]}"
-  if [[ -f "$dir/cleanup.sh" ]]; then
+do_check() {
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  echo ""
+  if [ -f "$dir/check.sh" ]; then
+    echo -e "  ${YELLOW}Checking your answer...${NC}"
     echo ""
-    echo -e "${YELLOW}═══ Resetting: ${SCENARIO_TITLES[$CURRENT]} ═══${NC}"
-    bash "$dir/cleanup.sh"
-    echo -e "${GREEN}✓ Reset complete${NC}"
+    if bash "$dir/check.sh"; then
+      echo ""
+      echo -e "  ${GREEN}${BOLD}✓ All checks passed!${NC}"
+    else
+      echo ""
+      echo -e "  ${RED}✗ Some checks failed. Keep trying or view solution [s].${NC}"
+    fi
   else
-    echo -e "${RED}No cleanup.sh found in $dir${NC}"
+    echo -e "  ${DIM}No automated check. Compare with solution [s].${NC}"
   fi
   echo ""
-  echo -e "Press ${YELLOW}Enter${NC} to continue..."
-  read -r
+  wait_enter
 }
 
-mark_done_next() {
-  DONE[$CURRENT]=1
-  save_progress
-  echo -e "${GREEN}✓ Marked scenario $((CURRENT+1)) as done!${NC}"
-  if ((CURRENT < TOTAL - 1)); then
-    ((CURRENT++))
+do_reset() {
+  local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+  echo ""
+  if [ -f "$dir/cleanup.sh" ]; then
+    echo -e "  ${YELLOW}Cleaning up scenario...${NC}"
+    bash "$dir/cleanup.sh" 2>/dev/null || true
+    SCENARIO_ACTIVE=false
+    echo -e "  ${GREEN}✓ Scenario reset.${NC}"
+  else
+    echo -e "  ${RED}No cleanup.sh found.${NC}"
   fi
+  echo ""
+  wait_enter
+}
+
+do_full_reset() {
+  echo ""
+  echo -e "  ${YELLOW}${BOLD}FULL RESET${NC}"
+  echo -e "  ${DIM}This runs cleanup for ALL scenarios and restores a fresh state.${NC}"
+  echo ""
+  echo -ne "  ${BOLD}Are you sure? [y/N]: ${NC}"
+  read -r confirm
+  echo ""
+  case "$confirm" in
+    y|Y)
+      echo -e "  ${YELLOW}Running cleanup for every scenario...${NC}"
+      echo ""
+      for s in "${SCENARIOS[@]}"; do
+        local cdir="$SCRIPT_DIR/$s"
+        if [ -f "$cdir/cleanup.sh" ]; then
+          echo -e "  ${DIM}→ cleaning $s${NC}"
+          bash "$cdir/cleanup.sh" >/dev/null 2>&1 || true
+        fi
+      done
+      SCENARIO_ACTIVE=false
+
+      echo ""
+      echo -e "  ${YELLOW}Deleting any leftover scenario namespaces...${NC}"
+      kubectl delete namespace \
+        audit monitoring network-demo prod team-a \
+        --ignore-not-found --grace-period=0 --force >/dev/null 2>&1 || true
+
+      echo -e "  ${YELLOW}Cleaning leftover default-namespace workloads...${NC}"
+      kubectl delete deployment \
+        api-server web-app web-app-canary api-deploy secure-app web-app \
+        web-svc web-deploy web-config rollout-app compute-app broken-app app-v1 \
+        -n default --ignore-not-found --grace-period=0 --force >/dev/null 2>&1 || true
+      kubectl delete service web-service web-svc api-nodeport -n default --ignore-not-found >/dev/null 2>&1 || true
+      kubectl delete cronjob backup-job report-generator -n default --ignore-not-found >/dev/null 2>&1 || true
+      kubectl delete job manual-report backup-job-test -n default --ignore-not-found >/dev/null 2>&1 || true
+      kubectl delete ingress web-ingress api-ingress -n default --ignore-not-found >/dev/null 2>&1 || true
+      kubectl delete secret db-credentials -n default --ignore-not-found >/dev/null 2>&1 || true
+      kubectl delete configmap app-config -n default --ignore-not-found >/dev/null 2>&1 || true
+
+      echo ""
+      echo -e "  ${YELLOW}Checking cluster health...${NC}"
+      if kubectl get nodes --request-timeout=5s >/dev/null 2>&1; then
+        echo -e "  ${GREEN}✓ API server reachable${NC}"
+        kubectl get nodes 2>/dev/null | sed 's/^/    /'
+      else
+        echo -e "  ${RED}✗ API server not reachable.${NC}"
+        echo -e "  ${DIM}Try: systemctl restart kubelet ; sleep 30 ; kubectl get nodes${NC}"
+      fi
+
+      echo ""
+      echo -e "  ${GREEN}${BOLD}✓ Reset to fresh state.${NC}"
+      ;;
+    *)
+      echo -e "  ${DIM}Cancelled.${NC}"
+      ;;
+  esac
+  echo ""
+  wait_enter
+}
+
+do_quit() {
+  echo ""
+  # Cleanup active scenario
+  if [ "$SCENARIO_ACTIVE" = true ]; then
+    local dir="$SCRIPT_DIR/${SCENARIOS[$CURRENT]}"
+    if [ -f "$dir/cleanup.sh" ]; then
+      echo -e "  ${YELLOW}Cleaning up active scenario...${NC}"
+      bash "$dir/cleanup.sh" 2>/dev/null || true
+    fi
+  fi
+
+  echo ""
+  echo -e "  ${BOLD}Before quitting:${NC}"
+  echo -e "    ${CYAN}[s]${NC} Save progress and quit"
+  echo -e "    ${CYAN}[r]${NC} Reset ALL progress (start fresh next time) and quit"
+  echo -e "    ${CYAN}[c]${NC} Cancel (go back)"
+  echo ""
+  echo -ne "  ${BOLD}Choice: ${NC}"
+  read -r -n1 qchoice
+  echo ""
+
+  case "$qchoice" in
+    s|S)
+      save_progress
+      echo -e "\n  ${GREEN}Progress saved (${#COMPLETED[@]}/${TOTAL} done). Good luck with your CKAD exam! 🎯${NC}\n"
+      exit 0
+      ;;
+    r|R)
+      reset_all_progress
+      echo -e "\n  ${YELLOW}All progress reset. Fresh start next time! 🎯${NC}\n"
+      exit 0
+      ;;
+    *)
+      # Cancel — go back to menu
+      return
+      ;;
+  esac
+}
+
+list_scenarios() {
+  echo ""
+  echo -e "  ${BOLD}All ${TOTAL} CKAD Scenarios:${NC}"
+  echo ""
+  for i in "${!SCENARIOS[@]}"; do
+    local num=$((i + 1))
+    local numstr
+    numstr=$(printf "%02d" "$num")
+    local marker="  "
+    local color="$NC"
+
+    if [ "$i" -eq "$CURRENT" ]; then
+      marker="▶ "
+      color="$YELLOW"
+    fi
+
+    if is_completed "$i"; then
+      echo -e "    ${GREEN}${marker}${numstr}. ${SCENARIO_TITLES[$i]} ✓${NC}"
+    else
+      echo -e "    ${color}${marker}${numstr}. ${SCENARIO_TITLES[$i]}${NC}"
+    fi
+  done
+  echo ""
+  wait_enter
 }
 
 next_scenario() {
-  if ((CURRENT < TOTAL - 1)); then
-    ((CURRENT++))
+  if [ "$CURRENT" -lt "$LAST_INDEX" ]; then
+    CURRENT=$((CURRENT + 1))
+    save_progress
   else
-    echo -e "${YELLOW}Already at last scenario.${NC}"
+    echo -e "\n  ${GREEN}${BOLD}🎉 You're on the last scenario already!${NC}\n"
     sleep 1
   fi
 }
 
 prev_scenario() {
-  if ((CURRENT > 0)); then
-    ((CURRENT--))
-  else
-    echo -e "${YELLOW}Already at first scenario.${NC}"
-    sleep 1
+  if [ "$CURRENT" -gt 0 ]; then
+    CURRENT=$((CURRENT - 1))
+    save_progress
   fi
 }
 
-# ── Sub-loop after setup ────────────────────────────────────────────
-scenario_subloop() {
-  while true; do
-    echo -e "  ${BOLD}Scenario Active: ${SCENARIO_TITLES[$CURRENT]}${NC}"
-    echo ""
-    echo -e "    ${CYAN}[c]${NC} Check answer  ${CYAN}[s]${NC} Show Solution  ${CYAN}[t]${NC} Show Task"
-    echo -e "    ${CYAN}[x]${NC} Reset         ${CYAN}[d]${NC} Mark done      ${CYAN}[b]${NC} Back to menu"
-    echo ""
-    echo -n "  Choice: "
-    read -r choice
-    case "$choice" in
-      c) check_answer ;;
-      s) show_solution ;;
-      t) show_task ;;
-      x) reset_scenario ;;
-      d) mark_done_next; return ;;
-      b|q) return ;;
-      *) echo -e "${RED}Invalid option${NC}" ;;
-    esac
-  done
+wait_enter() {
+  echo -ne "  ${DIM}Press Enter to continue...${NC}"
+  read -r
 }
 
-# ── Cleanup on quit ─────────────────────────────────────────────────
-cleanup_on_quit() {
-  save_progress
-  echo ""
-  echo -e "${GREEN}Progress saved. Good luck with your CKAD exam! 🎯${NC}"
-  echo ""
-}
+# ─── Main loop ─────────────────────────────────────────────────────
 
-# ── Main Loop ───────────────────────────────────────────────────────
 main() {
   load_progress
 
-  # Allow jumping to scenario via argument
-  if [[ $# -ge 1 ]]; then
-    local jump="${1}"
-    # Support both "3" and "03" formats
-    jump=$((10#$jump))  # Remove leading zeros
-    if ((jump >= 1 && jump <= TOTAL)); then
-      CURRENT=$((jump - 1))
-    else
-      echo -e "${RED}Invalid scenario number: $1 (must be 1-$TOTAL)${NC}"
-      exit 1
+  # Allow jumping to a specific scenario via argument
+  if [ "${1:-}" ] && [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+    local target=$((10#$1 - 1))
+    if [ "$target" -ge 0 ] && [ "$target" -le "$LAST_INDEX" ]; then
+      CURRENT=$target
+      save_progress
     fi
   fi
 
   while true; do
-    show_main_menu
-    echo -n "  Choice: "
-    read -r choice
+    clear_screen
+    show_header
+    show_menu
+
+    echo -ne "  ${BOLD}Choice: ${NC}"
+    read -r -n1 choice
+    echo ""
+
     case "$choice" in
-      r) run_setup ;;
-      t) show_task ;;
-      s) show_solution ;;
-      c) check_answer ;;
-      x) reset_scenario ;;
-      d) mark_done_next ;;
-      n) next_scenario ;;
-      p) prev_scenario ;;
-      l) list_all ;;
-      q) cleanup_on_quit; exit 0 ;;
-      [1-9]|1[0-9]|2[01])
-        local jump=$((10#$choice))
-        if ((jump >= 1 && jump <= TOTAL)); then
-          CURRENT=$((jump - 1))
-        fi
-        ;;
-      *) echo -e "${RED}Invalid option${NC}"; sleep 0.5 ;;
+      r|R) do_setup ;;
+      t|T) show_task; wait_enter ;;
+      s|S) show_solution; wait_enter ;;
+      c|C) do_check ;;
+      x|X) do_reset ;;
+      f|F) do_full_reset ;;
+      d|D) mark_completed "$CURRENT"; next_scenario ;;
+      n|N) next_scenario ;;
+      p|P) prev_scenario ;;
+      l|L) list_scenarios ;;
+      q|Q) do_quit ;;
+      *) ;;
     esac
   done
 }
