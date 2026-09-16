@@ -9,7 +9,7 @@ kubectl create deployment app-v1 --image=nginx:1.20 --replicas=3 --dry-run=clien
   kubectl apply -f -
 
 # Add annotation to record the change cause for revision history
-kubectl annotate deployment app-v1 kubernetes.io/change-cause="Initial deployment with nginx:1.20"
+kubectl annotate deployment app-v1 kubernetes.io/change-cause="Initial deployment with nginx:1.20" --overwrite
 
 # Wait for deployment to be ready
 echo "Waiting for deployment app-v1 to be ready..."

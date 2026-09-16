@@ -3,15 +3,37 @@ set -e
 
 echo "Setting up Scenario 15 – Fix Ingress PathType..."
 
-# Create deployment api-deploy with label app=api
-kubectl create deployment api-deploy --image=nginx --replicas=2 -n default
-kubectl label deployment api-deploy app=api -n default --overwrite
+# Start clean so re-running is safe (Deployment selector is immutable).
+kubectl delete ingress api-ingress -n default --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete service api-svc -n default --ignore-not-found >/dev/null 2>&1 || true
+kubectl delete deployment api-deploy -n default --ignore-not-found >/dev/null 2>&1 || true
+kubectl wait --for=delete deployment/api-deploy -n default --timeout=60s >/dev/null 2>&1 || true
 
-# Patch pod template labels
-kubectl patch deployment api-deploy -n default --type='json' -p='[
-  {"op": "replace", "path": "/spec/template/metadata/labels", "value": {"app": "api"}},
-  {"op": "replace", "path": "/spec/selector/matchLabels", "value": {"app": "api"}}
-]'
+# Create deployment api-deploy with label app=api (declarative — no immutable patching)
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-deploy
+  namespace: default
+  labels:
+    app: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: nginx:latest
+          ports:
+            - containerPort: 80
+EOF
 
 # Create service api-svc with port 8080, targetPort 80, selector app=api
 kubectl apply -f - <<EOF
